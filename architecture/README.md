@@ -5,6 +5,7 @@ Business OS architecture (v1, rev 2)
 - [Overview](overview.md): diagrams, services, data, tenancy, CQRS, ops
 - [Integrations](integrations.md)
 - [Security & compliance](security-compliance.md)
+- [Disaster recovery runbook](../docs/runbooks/disaster-recovery.md)
 - [ADRs](../adr/README.md)
 - [Diagrams](diagrams/): PNG, SVG, draw.io
 
