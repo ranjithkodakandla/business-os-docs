@@ -2,13 +2,13 @@
 - **Context:** Ranjith's core principle is that the team builds in parallel with no known tech debt and no monolith of any kind. The prototype shares `src/lib` between server and client with no boundaries.
 - **Options:**
   - (a) modular monolith (rejected by principle)
-  - (b) microservices per domain + MFEs per module from day one, on a shared template and shared infra
-  - (c) microservices with per-service databases/instances
+  - (b) microservices + MFEs with one shared Cloud SQL instance (schema per service)
+  - (c) microservices + MFEs with a database (Cloud SQL instance) per service
 - **₹ costs:**
-  - (b) with Cloud Run scale-to-zero and one shared Cloud SQL ≈ ₹6–7.5k/month at MVP0 and ₹15–20k at MVP1 (estimate, §6b).
-  - (c) adds about ₹2,430+ per service per month for its own instance, ≈ ₹27k+/month extra at MVP0.
-- **Decision:** (b).
-  - 11 domain services (§3), each with its own repo or package, deploy, schema, DB user, outbox, OpenAPI spec and dashboard.
+  - (b) ≈ ₹6–7.5k/month at MVP0 and ₹15–20k at MVP1 (estimate).
+  - (c) ≈ ₹16–18k/month at MVP0 and ₹39.5–44.5k at MVP1: +≈ ₹10.3k and +≈ ₹22.9k for Cloud SQL (overview §6b/§6c).
+- **Decision:** (c), Ranjith's decision 31 Oct 2026, in line with AGENTS.md (no shared database across services).
+  - 11 domain services (§3), each with its own repo or package, deploy, Cloud SQL instance, DB user/service account, outbox, OpenAPI spec and dashboard.
   - An API gateway in front.
   - Async-first over Kafka.
   - New services are cut from `service-template`, so one more service costs minutes, not bespoke infra.

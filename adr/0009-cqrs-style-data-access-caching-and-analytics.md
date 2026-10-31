@@ -6,13 +6,13 @@
   - full CQRS with separate read databases per service
   - analytics in BigQuery vs ClickHouse
 - **₹ costs:**
-  - replica ≈ the price of the instance (g1-small ≈ ₹2,430/month), added only from MVP1
+  - a replica is per instance and costs the same as its primary (g1-small ≈ ₹2,917/month in asia-south1); MVP1 adds one, on billing-invoicing only
   - BigQuery free tier first (amounts not re-checked)
   - ClickHouse Cloud/self-host not priced here (**Unverified**)
 - **Decision:**
-  - Writes → primary; tolerant reads → replica, with LSN read-your-writes tokens (5 s primary-stickiness fallback) and lag-based eviction (§6a).
+  - Writes → the service's own primary; tolerant reads → that service's own replica where one exists (replicas per instance, none at MVP0), with LSN read-your-writes tokens (5 s primary-stickiness fallback) and lag-based eviction (§6a).
   - Redis/Valkey cache-aside with tenant-scoped keys, invalidated by Kafka events.
-  - Analytics: BigQuery fed from Kafka.
+  - Analytics and any cross-service reporting: BigQuery fed from Kafka (every service's events), never queries across instances.
   - Per-service read models (projections) built from events only where a screen needs cross-domain data.
 - **Consequences:**
   - The data layer has a read/write router from W3, even before a replica exists.

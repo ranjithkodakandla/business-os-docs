@@ -6,12 +6,14 @@
   - (c) is about $150/tenant/month per dedicated DB (plan Sheet estimate, **Unverified**), impossible at ₹4,999 plans.
   - (d) costs the same as (a) for most tenants, plus (c) only where it is paid for.
 - **Decision:** (d), with the catalog owned by **identity-tenancy**.
-  - T1: each service's tables on the shared instance with RLS.
-  - T2: per-tenant schemas within each service's database area (paid add-on).
-  - T3: a dedicated Cloud SQL instance hosting all service schemas for that tenant (Enterprise).
-  - The gateway resolves the tier from the catalog (Redis-cached) and passes a signed tenant context; each service's data layer picks the pool.
+  - Tiers apply **per service database** (database per service, 11 instances; no shared instance).
+  - T1: shared tables with RLS inside each service's own instance.
+  - T2: per-tenant schema inside that service's instance (paid add-on), per service.
+  - T3: a dedicated instance per service for that tenant (Enterprise); a tenant may be T3 for billing and T1 for notifications.
+  - The catalog maps **tenant × service → tier, instance, database, schema, KMS key**. The gateway passes a signed tenant context; each service's data layer looks up only its own (tenant, service) row (Valkey-cached) and picks the pool.
 - **Consequences:**
-  - Every service's migrations run per tier through a shared migration runner.
+  - Every service's migrations run per tier and per instance through the shared migration-runner library, iterating that service's catalog rows.
+  - Promotion is per service (move one service's rows for a tenant), so it can be staged.
   - Promotion tooling is needed by MVP2/MVP3.
   - Cross-tenant analytics happen only in BigQuery.
 - **Promotion triggers:** as in §4.

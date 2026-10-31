@@ -35,7 +35,7 @@ Full decision: [ADR-010](../adr/0010-data-security-privacy-and-compliance.md)
    - TLS 1.3 at the edge (Cloud Armor + LB SSL policy `MODERN`, min TLS 1.2 allowed only for legacy clients, with a warning; HSTS).
    - Service-to-service traffic over HTTPS with Cloud Run IAM-authenticated invocations.
    - Kafka over TLS with SASL credentials per service.
-   - Cloud SQL via the connector or PgBouncer with TLS required.
+   - Each service reaches only its own Cloud SQL instance, via the Cloud SQL connector with IAM DB auth as its own service account, TLS required.
 2. **At rest:** AES-256 everywhere:
    - Google default encryption for Cloud SQL, GCS, BigQuery, Memorystore and Kafka storage.
    - CMEK with a platform key ring in asia-south1 for Cloud SQL, GCS and BigQuery.
@@ -44,7 +44,7 @@ Full decision: [ADR-010](../adr/0010-data-security-privacy-and-compliance.md)
    - Wrapped DEKs live in a separate **key store**: a `svc_keys` schema on its own small database with short backup retention, not the business database.
    - Unwrapped DEKs are cached in memory for ≤ 15 min.
    - Per-subject DEKs (one per employee or contact) are used for erasable PII.
-   - **Enterprise add-on:** a dedicated per-tenant KMS key (SOFTWARE or HSM), or **Cloud EKM** (the customer holds the key in their own external key manager). T3 dedicated Cloud SQL instances use that tenant's CMEK.
+   - **Enterprise add-on:** a dedicated per-tenant KMS key (SOFTWARE or HSM), or **Cloud EKM** (the customer holds the key in their own external key manager). With database per service, CMEK is set per instance (11 instances, one key per service in the platform key ring); T3 dedicated per-service instances use that tenant's CMEK.
 4. **Field-level encryption** for PAN, bank account/IFSC, salary, phone/email of data principals and any government IDs:
    - Stored as ciphertext columns.
    - Search via **blind indexes**: HMAC-SHA256 under a per-tenant index key, truncated, on normalised values.
