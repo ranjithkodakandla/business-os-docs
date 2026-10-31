@@ -131,6 +131,8 @@ Modules not yet listed as services (people/payroll, production/make, platform Sa
 
 **Promotion mechanics:** catalog marks tenant `migrating` → logical copy (pg_dump of tenant rows, or logical replication filtered by tenant_id) → verify row counts + checksums → brief write freeze (flag `tenant.readonly`) → flip catalog → purge source rows after 7 days. Same migration scripts run per target (shared once, each schema, each dedicated DB) via a migration runner that iterates the catalog.
 
+**Promotion write-freeze SLA (< 30 s):** promotion runs per service instance (each of the 11 services has its own Cloud SQL instance, so a T1→T2 move is repeated per service, catalog entry per tenant × service). The `tenant.readonly` freeze must stay under 30 s per service; if the copy-verify-flip for a tenant can't meet that (measured in a dry run), use live logical replication filtered by `tenant_id` and freeze only for the final catch-up and catalog flip. Tenant users see an in-app banner ("Upgrading your workspace; changes are paused for under a minute") driven by the `tenant.readonly` flag. The banner and the migration tooling (runner, dry-run timer, row-count/checksum verifier, rollback) must be built before the first T1→T2 promotion.
+
 **Scaling to 10k+ tenants:** T1 shards = multiple shared clusters (e.g. ~2,000 small tenants per cluster, an Unverified sizing assumption to load-test); the catalog makes sharding transparent. All 11 services connect via PgBouncer with a per-service DB user and connection budget (see §6b).
 
 ## 5. HA, DR and PITR
@@ -164,6 +166,13 @@ Cloud Run services are multi-zone by default; min instances only on the gateway,
 - **Cache (Memorystore for Redis/Valkey):** keys are always `t:{tenant_id}:{service}:{entity}:{id}:v{schema}`, and a service may only read or write its own prefix. Cache-aside with TTL (≤ 5 min), invalidated by the owning service's own Kafka events (e.g. `inventory.stock.moved` deletes `t:{tid}:inventory:stock:{item}`). Never cache authorisation decisions longer than 60 s. Flag kill-switch fan-out uses Redis pub/sub.
 - **Analytics read store: BigQuery**, fed from Kafka by a sink (Confluent BigQuery sink connector, or a small consumer using the Storage Write API). Tables are partitioned by date and clustered by tenant_id. It is used for platform SaaS metrics and cross-tenant reports, never as an OLTP read path. ClickHouse is a later option if sub-second dashboards are needed. BigQuery has a monthly free tier for storage and queries (https://cloud.google.com/bigquery/pricing; tier amounts not re-checked this session).
 - **Phasing:** MVP0 uses no replica (the read router points at the primary, so the code path exists from day one). MVP1 adds one replica once read load or report queries justify it, plus the BigQuery sink for platform metrics.
+
+**LLM response cache (interface MVP0, implementation MVP1):**
+- The ai-agents service defines a `LlmResponseCache` interface in MVP0 (no-op implementation), so callers don't change later.
+- MVP1: exact-match cache in Valkey, key `t:{tenant_id}:ai-agents:llm:{intent}:{sha256(normalised params)}`, TTL 5 min. Only structured results (e.g. a computed summary or lookup answer) are cached; free text tied to a user turn is not.
+- Never cache proposed actions (anything that becomes an approval proposal); they are always regenerated against live data.
+- Invalidate on Kafka events from the owning domain (e.g. `billing.invoice.*` deletes cached invoice-related intents for that tenant).
+- Semantic (embedding-similarity) cache: MVP2+, read-only intents only, same "never for proposed actions" rule.
 
 ## 6b. Lean costs (Cloud Run per service, scale to zero)
 
@@ -226,6 +235,13 @@ Decision: **OpenTelemetry SDK in every service, the gateway and every MFE → OT
 - **Consumers:** Cloud Run services stay scale-to-zero. The event-dispatcher consumes on their behalf and pushes over authenticated HTTP to each subscriber's `/events` endpoint, with retries and the DLQ. Subscribers dedupe in a `processed_events(event_id)` table.
 - **Schema registry:** Confluent Schema Registry (JSON Schema), compatibility = BACKWARD, and CI registers schemas from the contracts repo.
 - **Long workflows** (payroll run, e-invoice batch) use choreographed events with a saga state table. Temporal is reconsidered at MVP2.
+**Agent action compensation pattern:**
+1. Owner approves a proposal → ai-agents publishes `agent.action_approved` (carries `proposal_id`, used as `X-Agent-Action-ID`).
+2. The owning service performs the write (idempotency key = `proposal_id`) and publishes `<domain>.<action>.completed` (or `.executed`), e.g. `billing.invoice.completed`.
+3. ai-agents marks the proposal `executed` on that event.
+4. On failure the dispatcher retries up to 3 times with backoff. After the 3rd failure ai-agents publishes `agent.action_failed`, marks the proposal `failed`, and notifies the owner (notifications service) with the reason and a "retry manually" action.
+5. Financial actions (invoices, payments, refunds, credit notes, stock write-offs) are never auto-retried beyond those 3 attempts; only the owner can re-trigger.
+
 - **Feature flags:** the feature-flags service implements an OpenFeature provider (self-built, ₹0 per the plan Sheet; Unleash OSS is the drop-in alternative).
   - Stages: Internal → Alpha → Beta → 5/25/50/100% sticky hash(tenant + flag) → GA → removed within 30 days.
   - Kill switch: global or per tenant, propagates in < 10 s via `flags.flag.killed` on Kafka plus a Redis pub/sub fan-out, audited.
